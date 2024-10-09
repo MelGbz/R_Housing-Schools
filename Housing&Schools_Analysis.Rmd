@@ -1,0 +1,1077 @@
+---
+title: "Housing & Schools Analysis"
+output:
+  html_document:
+    df_print: paged
+---
+
+## Context ##
+
+A small, private housing organization is looking to expand on opportunities in new 
+neighborhoods. Although the organization cannot disclose much about their project, they would 
+still like an outside opinion on housing market patterns in certain neighborhoods. 
+
+The organization has hired you as a consultant to analyze a subset of their data and provide 
+recommendations for areas of potential growth. The organization has a mix of people with 
+varying data science backgrounds. The ones who will be reading your report range from 
+somewhat familiar with data science to completely unfamiliar with data science. They have 
+asked you to make sure that your report is clear to all readers. The organization would also like 
+an annotated copy of your R-code in case they need to re-run analyses. 
+
+## About the datasets ##
+
+*housing.csv* - dataset of houses sold in 2019 
+
+* **neighborhood** – name of the neighborhood, indicator of a general area in the city 
+* **beds** – number of bedrooms in the unit 
+* **baths** – number of bathrooms in the unit 
+* **sqft** – unit square footage 
+* **lotsize** – unit’s lot size 
+* **year** – year that the unit was built 
+* **type** – unit type 
+* **levels** – how many floors are in the unit 
+* **cooling** – whether or not the unit has cooling 
+* **heating** – whether or not the unit has central heating 
+* **fireplace** – whether or not the unit has a fireplace 
+* **elementary** – unit’s assigned elementary school 
+* **middle** – unit’s assigned middle school 
+* **high** – unit’s assigned high school 
+* **soldprice** – selling price of the home 
+
+
+*schools.csv* – dataset of school rating 
+
+* **school** – name of the high school 
+* **size** – approximate student population size 
+* **rating** – school rating on a 1 to 10 scale 
+
+### Libraries ###
+
+```{r}
+library(stringr)
+library(dplyr)
+library(ggplot2)
+```
+
+
+### Data Exploration and Data Cleaning ###
+
+**housing.csv EXPLORATION**
+
+```{r}
+housing <-read.csv("housing.csv", header = T)
+dim(housing)
+```
+
+```{r}
+summary(housing)
+```
+
+Let's analyze this first summary of the *housing.csv* dataset, column by column:
+We can't say much about the *neighborhood*, *type*, *levels*, *cooling*, *heating*, *fireplace*, *elementary*, *middle* and *high* columns, as the values are not categorized. 
+The *beds* column takes most of its values between 1 and 4, but the maximum value is 999. You can therefore expect visible outliers.
+The same goes for the *baths* column, which takes most of its values between 1 and 2.5, yet has a maximum value of 25.
+The *sqft* values are very wide but not unlikely, ranging from 536 to 5265, with 50% of values being between 1349 and 2676. There are 2 NA's.
+A few outliers are to be expected in the *lotsize* category, in addition to 20 NA's.
+In the *year* category, it's surprising that the minimum year is 1495 for a 1st quartile of 1961. This year is probably an outlier. Same for the 2111 value which can not be correct, obvisouly. The rest of the values seem correct.
+Finally, the *soldprice* column takes most of its values between 974500 and 1548000, with a minimum of 664 and a maximum of 2393000. The difference between min and Q1 is impressive, probably the result of an outlier.
+
+Let's check our guesses with simple boxplots:
+
+```{r}
+par(mfrow = c(1, 6), mar = c(3, 3, 3, 3) + 0.1, las = 1)
+
+boxplot(housing$beds, main="Beds")
+boxplot(housing$baths, main="Baths")
+boxplot(housing$sqft, main="Square Feet")
+boxplot(housing$lotsize, main="Lot Size")
+boxplot(housing$year, main="Year")
+boxplot(housing$soldprice, main="Sold Price")
+```
+
+From the boxplots, we can deduce that the Max value of the *beds* category absolutely must be removed or readjusted, as it is the only outlier in this category, as must the *baths* category and its Max value of 25.
+The *sqft* category contains a few outliers at the top of the boxplot. The values remain fairly close, so their presence doesn't seem to be a cause for concern.
+The *lotsize* category has many outliers in the upper part of the boxplot, so 4 are quite far apart. A readjustment may be in order.
+The *year* category has 2 extreme values: the minimum value of 1495 identified above, and the maximum value for 2111. We could delete or readjust these values. 
+Finally, *soldprice* contains only one outlier, the value 664 mentionned earlier. 
+
+
+Before going further, let's categorize the columns mentionned above:
+
+```{r warning = FALSE}
+housing$neighborhood <- as.factor(housing$neighborhood)
+housing$type <- as.factor(housing$type)
+housing$levels <- as.integer(housing$levels)
+housing$cooling <- as.factor(housing$cooling)
+housing$heating <- as.factor(housing$heating)
+housing$fireplace <- as.factor(housing$fireplace)
+housing$elementary <- as.factor(housing$elementary)
+housing$middle <- as.factor(housing$middle)
+housing$high <- as.factor(housing$high)
+
+summary(housing)
+```
+
+```{r}
+table(housing$neighborhood)
+table(housing$type)
+table(housing$elementary)
+table(housing$middle)
+table(housing$high)
+```
+
+Now that the columns neighborhood, type, levels, cooling, heating, fireplace, elementary, middle and high are categorized, we can analyze them:
+
+*neighborhood* is categorized by color and there are no NA's to report. However, we note that the purple category is under-represented: it contains 3 values, compared with 141 for orange, for example.
+*type* contains duplicate. Indeed, condo is a short for condominium, et town house is the same as townhouse without space. 
+*levels* appears well-balanced, but has 6 NA's.
+*cooling*, *heating* and *fireplace* have 7, 7 and 6 NA's respectively. 
+For the *elementary*, *middle* and *high* categories, there are no missing values. What's more, the values are well distributed overall.
+
+Let's keep in mind that we have a dataset of 683 rows, so deleting some rows containing NA should not affect the results of our dataset. However, let's find a way to keep as many values as possible.
+
+
+**housing.csv CLEANING**
+
+Let's begin the cleaning section by looking at the duplicate :
+
+```{r}
+# Trim leading and trailing spaces in the cooling, heating and fireplace column
+housing$type <- str_trim(housing$type)
+
+# Change value
+housing$type[housing$type == "condominium"] <- "condo"
+housing$type[housing$type == "town house"] <- "townhouse"
+
+housing$type <- as.factor(housing$type)
+
+table(housing$type)
+```
+
+
+Now, let's take a look at the outliers: 
+
+* **999 beds?**
+
+```{r}
+housing[housing$beds == 999, ]
+```
+
+999 was obviously a mistake because there is only 1 bath and the house has 753 square feet, which is pretty small to indeed contain 999 bedrooms. Let's look at similar house :
+
+```{r}
+housing[housing$sqft == 753, ]
+```
+
+In comparison with similar houses, 999 bedrooms can be changed into a 1 bedroom house.
+
+```{r}
+housing$beds[housing$beds == 999] <- 1
+housing[189, ]
+boxplot(housing$beds, main="Beds")
+```
+
+There is still what seem to be an outlier with value equal 0 and value equal 6.
+
+```{r}
+housing[housing$beds == 6, ]
+housing[housing$beds == 1, ]
+```
+
+88 houses contain 6 bedrooms, and 92 contains 1 bedroom. It is not an isolated cases so we can let it this way.
+
+* **25 baths?**
+
+```{r}
+housing[housing$baths == 25, ]
+```
+
+```{r}
+housing[housing$beds == 4 & housing$sqft >= 2450 & housing$sqft <= 2650 & housing$type == "single-family home" & housing$levels == 1, ]
+```
+
+In comparison with similar houses and considering this outlier as a typing mistake, 25 bathrooms can be changed into a 2.5 bathroom house.
+
+```{r}
+housing$baths[housing$baths == 25] <- 2.5
+housing[520, ]
+boxplot(housing$baths, main="Baths")
+```
+
+There is still what seem to be an outlier with value equal 5.
+
+```{r}
+housing[housing$baths == 5, ]
+```
+
+17 houses contain 5 bathrooms. It is not an isolated case so we can let it this way.
+
+* **year 1495?**
+
+```{r}
+housing[housing$year == 1495, ]
+```
+
+```{r}
+housing[housing$beds == 1 & housing$baths == 1 & housing$sqft >= 750 & housing$sqft <= 850 & housing$type == "townhouse" & housing$levels == 1, ]
+```
+
+In comparison with similar houses, We can suppose that 1495 was actually an error made while typing the number. Therefore, we turn 1495 into 1945.
+
+```{r}
+housing$year[housing$year == 1495] <- 1945
+housing[677, ]
+boxplot(housing$year, main="Year")
+```
+
+* **year 2111?**
+
+```{r}
+housing[housing$year == 2111, ]
+```
+
+2111 is probably a mistake made while writing the date. Let's replace this value by 2011 which seem to be more reasonable.
+
+```{r}
+housing$year[housing$year == 2111] <- 2011
+housing[193, ]
+boxplot(housing$year, main="Year")
+```
+
+* **Soldprice equal to 664?**
+
+```{r}
+housing[housing$soldprice == 664, ]
+```
+
+```{r}
+housing[housing$beds == 1 & housing$baths == 1 & housing$sqft >= 700 & housing$sqft <= 800 & housing$type == "condo" & housing$levels == 1 & housing$neighborhood == "Orange", ]
+```
+
+In comparison with similar houses in the same neighborhood, soldprice should be between 423000 and 512000 or above, especially that this house is newer than the other 2 and it has cooling and heating. Therefore, price is probably missing zeros.
+
+```{r}
+housing$soldprice[housing$soldprice == 664] <- 664000
+housing[209, ]
+boxplot(housing$soldprice, main="Soldprice")
+```
+
+```{r}
+summary(housing)
+```
+
+**Missing values**
+
+Now, let's change the empty space of cooling, heating and fireplace in NA's value:
+
+```{r}
+# Trim leading and trailing spaces in the cooling, heating and fireplace column
+housing$cooling <- str_trim(housing$cooling)
+housing$heating <- str_trim(housing$heating)
+housing$fireplace <- str_trim(housing$fireplace)
+
+# Replace empty strings with NA
+housing$cooling[housing$cooling == ""] <- NA
+housing$heating[housing$heating == ""] <- NA
+housing$fireplace[housing$fireplace == ""] <- NA
+
+# Replace Yes by 1 and No by 0
+housing$cooling <- ifelse(housing$cooling == "Yes", 1,
+                                      ifelse(housing$cooling == "No", 0, NA))
+housing$heating <- ifelse(housing$heating == "Yes", 1,
+                                      ifelse(housing$heating == "No", 0, NA))
+housing$fireplace <- ifelse(housing$fireplace == "Yes", 1,
+                                          ifelse(housing$fireplace == "No", 0, NA))
+```
+
+
+```{r}
+summary(housing)
+```
+
+
+Finally, we can take care of the missing values. 
+
+* **NA's in sqft**
+
+```{r}
+# Use of all columns without NA's
+msqft <- lm(sqft~neighborhood+beds+baths+year+type+elementary+middle+high+soldprice, data = housing)
+
+housing[is.na(housing$sqft),] # rows 36 and 88
+
+housing$sqft[is.na(housing$sqft)] <- round(predict(msqft, list(
+	neighborhood = housing$neighborhood[is.na(housing$sqft)], 
+	beds = housing$beds[is.na(housing$sqft)],
+	baths = housing$baths[is.na(housing$sqft)],
+	year = housing$year[is.na(housing$sqft)],
+	type = housing$type[is.na(housing$sqft)],
+	elementary = housing$elementary[is.na(housing$sqft)],
+	middle = housing$middle[is.na(housing$sqft)],
+	high = housing$high[is.na(housing$sqft)],
+	soldprice = housing$soldprice[is.na(housing$sqft)]
+	)), 0)
+
+housing[36, ]
+housing[88, ]
+```
+
+* **NA's in lotsize**
+
+```{r}
+# Use of all columns without NA's
+mlotsize <- lm(lotsize~neighborhood+beds+baths+year+type+elementary+middle+high+soldprice, data = housing)
+
+housing[is.na(housing$lotsize),] # 20 rows
+
+housing$lotsize[is.na(housing$lotsize)] <- predict(mlotsize, list(
+	neighborhood = housing$neighborhood[is.na(housing$lotsize)], 
+	beds = housing$beds[is.na(housing$lotsize)],
+	baths = housing$baths[is.na(housing$lotsize)],
+	year = housing$year[is.na(housing$lotsize)],
+	type = housing$type[is.na(housing$lotsize)],
+	elementary = housing$elementary[is.na(housing$lotsize)],
+	middle = housing$middle[is.na(housing$lotsize)],
+	high = housing$high[is.na(housing$lotsize)],
+	soldprice = housing$soldprice[is.na(housing$lotsize)]
+	))
+
+summary(housing$lotsize)
+```
+
+* **NA's in cooling**
+
+```{r}
+# Use of all columns without NA's
+mcooling <- lm(cooling~neighborhood+beds+baths+year+type+elementary+middle+high+soldprice, data = housing)
+
+housing[is.na(housing$cooling),] # 7 rows
+
+housing$cooling[is.na(housing$cooling)] <- round(predict(mcooling, list(
+	neighborhood = housing$neighborhood[is.na(housing$cooling)], 
+	beds = housing$beds[is.na(housing$cooling)],
+	baths = housing$baths[is.na(housing$cooling)],
+	year = housing$year[is.na(housing$cooling)],
+	type = housing$type[is.na(housing$cooling)],
+	elementary = housing$elementary[is.na(housing$cooling)],
+	middle = housing$middle[is.na(housing$cooling)],
+	high = housing$high[is.na(housing$cooling)],
+	soldprice = housing$soldprice[is.na(housing$cooling)]
+	)), 0)
+
+summary(housing$cooling)
+```
+
+* **NA's in heating**
+
+```{r}
+# Use of all columns without NA's
+mheating <- lm(heating~neighborhood+beds+baths+year+type+elementary+middle+high+soldprice, data = housing)
+
+housing[is.na(housing$heating),] # 7 rows
+
+housing$heating[is.na(housing$heating)] <- round(predict(mheating, list(
+	neighborhood = housing$neighborhood[is.na(housing$heating)], 
+	beds = housing$beds[is.na(housing$heating)],
+	baths = housing$baths[is.na(housing$heating)],
+	year = housing$year[is.na(housing$heating)],
+	type = housing$type[is.na(housing$heating)],
+	elementary = housing$elementary[is.na(housing$heating)],
+	middle = housing$middle[is.na(housing$heating)],
+	high = housing$high[is.na(housing$heating)],
+	soldprice = housing$soldprice[is.na(housing$heating)]
+	)), 0)
+
+summary(housing$heating)
+```
+
+* **NA's in fireplace**
+
+```{r}
+# Use of all columns without NA's
+mfireplace <- lm(fireplace~neighborhood+beds+baths+year+type+elementary+middle+high+soldprice, data = housing)
+
+housing[is.na(housing$fireplace),] # 6 rows
+
+housing$fireplace[is.na(housing$fireplace)] <- round(predict(mheating, list(
+	neighborhood = housing$neighborhood[is.na(housing$fireplace)], 
+	beds = housing$beds[is.na(housing$fireplace)],
+	baths = housing$baths[is.na(housing$fireplace)],
+	year = housing$year[is.na(housing$fireplace)],
+	type = housing$type[is.na(housing$fireplace)],
+	elementary = housing$elementary[is.na(housing$fireplace)],
+	middle = housing$middle[is.na(housing$fireplace)],
+	high = housing$high[is.na(housing$fireplace)],
+	soldprice = housing$soldprice[is.na(housing$fireplace)]
+	)), 0)
+
+summary(housing$fireplace)
+```
+
+* **NA's in levels**
+
+```{r}
+# Use of all columns without NA's
+mlevels <- lm(levels~neighborhood+beds+baths+year+type+elementary+middle+high+soldprice, data = housing)
+
+housing[is.na(housing$levels),] # 6 rows
+
+housing$levels[is.na(housing$levels)] <- round(predict(mlevels, list(
+	neighborhood = housing$neighborhood[is.na(housing$levels)], 
+	beds = housing$beds[is.na(housing$levels)],
+	baths = housing$baths[is.na(housing$levels)],
+	year = housing$year[is.na(housing$levels)],
+	type = housing$type[is.na(housing$levels)],
+	elementary = housing$elementary[is.na(housing$levels)],
+	middle = housing$middle[is.na(housing$levels)],
+	high = housing$high[is.na(housing$levels)],
+	soldprice = housing$soldprice[is.na(housing$levels)]
+	)), 0)
+
+summary(housing$levels)
+```
+
+```{r}
+summary(housing)
+```
+```{r}
+par(mfrow = c(1, 6), mar = c(2, 2, 2, 2) + 0.1, las = 1)
+
+boxplot(housing$beds, main="Beds")
+boxplot(housing$baths, main="Baths")
+boxplot(housing$sqft, main="Square Feet")
+boxplot(housing$lotsize, main="Lot Size")
+boxplot(housing$year, main="Year")
+boxplot(housing$soldprice, main="Sold Price")
+```
+
+Our dataset *housing.csv* is now cleaned !Let's move to *school.csv*.
+
+**schools.csv EXPLORATION**
+
+```{r}
+schoolsData <-read.csv("schools.csv", header = T)
+dim(schoolsData)
+```
+
+```{r}
+summary(schoolsData)
+```
+
+
+This dataset contains very few values and no NA's. 
+
+```{r}
+par(mfrow = c(1, 2), mar = c(3, 3, 3, 3) + 0.1, las = 1)
+
+boxplot(schoolsData$size, main="Size")
+boxplot(schoolsData$rating, main="Rating")
+```
+
+In the size column, we notice some outliers which are pretty close to 'normal' values so nothing to worry about here.
+
+```{r}
+schoolsData$school <- as.factor(schoolsData$school)
+table(schoolsData$school)
+```
+
+We count 14 high schools, 15 middle schools and 23 elementary schools. Exactly the same number of each category of schools in the housing dataset.
+
+Let's merge the two datasets on the different categories of schools: elementary, middle and high. It will add 2 columns per category, and thus 6 columns in total.
+
+```{r}
+# Create new dataset
+housingMerg <- housing
+
+# Merge the housing and schools datasets based on the elementary school
+housingMerg <- housingMerg %>%
+  left_join(schoolsData %>% rename(elementary_rating = rating, elementary_size = size), 
+            by = c("elementary" = "school"))
+
+# Merge the housing and schools datasets based on the middle school
+housingMerg <- housingMerg %>%
+  left_join(schoolsData %>% rename(middle_rating = rating, middle_size = size), 
+            by = c("middle" = "school"))
+
+# Merge the housing and schools datasets based on the high school
+housingMerg <- housingMerg %>%
+  left_join(schoolsData %>% rename(high_rating = rating, high_size = size), 
+            by = c("high" = "school"))
+
+# Verify the merge
+summary(housingMerg)
+```
+
+We can move on to the next step and create graphs!
+
+### One-Variable Visuals ###
+
+*Include at least one histogram*
+
+> Histogram of Sold Prices:
+
+Let's start this series of graphs with 2 histograms giving us an indication of the distribution of sales prices and the number of square feet of the houses in the dataset.
+
+```{r}
+# Calculate quartiles
+Q1 <- quantile(housingMerg$soldprice, 0.25)
+median <- median(housingMerg$soldprice)
+Q3 <- quantile(housingMerg$soldprice, 0.75)
+
+# Histogram of Sold Prices
+ggplot(housingMerg, aes(x = soldprice)) + 
+  geom_histogram(binwidth = 50000, fill = "lightgreen", color = "black", alpha = 0.7) + 
+  geom_vline(xintercept = Q1, linetype = "dashed", color = "green") +
+  geom_vline(xintercept = median, linetype = "dashed", color = "red") +
+  geom_vline(xintercept = Q3, linetype = "dashed", color = "blue") +
+  annotate("text", x = Q1, y = 46, label = "Q1", hjust = 1.2, vjust = -0.4, color = "green") +
+  annotate("text", x = median, y = 46, label = "Median", hjust = 1.2, vjust = -0.4, color = "red") +
+  annotate("text", x = Q3, y = 46, label = "Q3", hjust = 1.2, vjust = -0.4, color = "purple") +
+  labs(title = "Distribution of Sold Prices", x = "Sold Price", y = "Frequency") +
+  theme_minimal()
+```
+
+The histogram provides a visual representation of the distribution of housing prices in the dataset.
+It helps in identifying the most common price ranges and understanding the spread of prices across the dataset.
+
+I've added the 1st quartile, median and 3rd quartile for greater precision.
+The distribution is normal and well spread out overall, with a peak in values at the median. There's also a slight peak at the 3rd quartile. Finally, a few values are off-center below 500,000 and above 200,000, corresponding to the min and max values announced in the summary. 
+
+**This suggests that most homes are sold between 100,000 and 175,000.**
+
+
+> Histogram of Square Feet:
+
+Now, let's take a look at which square feet are the most sold with the 2nd histogram showing the distribution of square feet. Like the previous graph, I've added the 1st quartile, median and 3rd quartile for greater precision.
+
+```{r}
+# Calculate quartiles
+Q1 <- quantile(housingMerg$sqft, 0.25)
+median <- median(housingMerg$sqft)
+Q3 <- quantile(housingMerg$sqft, 0.75)
+
+# Histogram of Square Feet
+ggplot(housingMerg, aes(x = sqft)) + 
+  geom_histogram(binwidth = 100, fill = "blue", color = "black", alpha = 0.6) +
+  geom_vline(xintercept = Q1, linetype = "dashed", color = "green") +
+  geom_vline(xintercept = median, linetype = "dashed", color = "red") +
+  geom_vline(xintercept = Q3, linetype = "dashed", color = "blue") +
+  annotate("text", x = Q1, y = 46, label = "Q1", hjust = 1.2, vjust = -0.4, color = "green") +
+  annotate("text", x = median, y = 46, label = "Median", hjust = 1.2, vjust = -0.4, color = "red") +
+  annotate("text", x = Q3, y = 46, label = "Q3", hjust = 1.2, vjust = -0.4, color = "purple") +
+  labs(title = "Distribution of Square Feet", x = "Square Feet", y = "Frequency") +
+  theme_minimal()
+```
+
+The distribution is a bit more balanced. Indeed, there's a peak between Q1 and Q3, but another peak is particularly visible in the lower part of the histogram around 750 square feet: not surprising, this corresponds to the 'condo' and 'condiminium' categories of houses, i.e. apartments. It's therefore normal to have a smaller set of surface areas than the rest.
+
+**The majority of homes sold are between 1,500 and 2,750 square feet for houses, and around 750 square feet for apartments.**
+
+
+*Include at least one bar plot*
+
+> Bar Plot of Number of Houses Sold per Neighborhood:
+
+Let's continue our analysis with 2 barplots. The first shows the number of homes sold per neighborhood.
+Each neighborhood is categorized by color. I've used the associated colors for ease of reading.
+
+```{r}
+# Define a named vector of colors for each neighborhood
+neighborhood_colors <- c(
+  "Blue" = "blue",
+  "Gold" = "gold",
+  "Green" = "green",
+  "Orange" = "orange",
+  "Purple" = "purple",
+  "Red" = "red",
+  "Silver" = "grey",
+  "Yellow" = "yellow"
+)
+
+# Bar Plot of Number of Houses Sold per Neighborhood
+ggplot(housingMerg, aes(x = reorder(neighborhood, -table(neighborhood)[neighborhood]), fill = neighborhood)) + 
+  geom_bar(color = "black", alpha = 0.7) +
+  scale_fill_manual(values = neighborhood_colors) +
+  labs(title = "Number of Houses Sold per Neighborhood", x = "Neighborhood", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+The bar plot shows the count of houses sold in each neighborhood. This helps in identifying which neighborhoods have the highest and lowest sales activity. It can be useful for understanding market demand and activity in different areas.
+
+The Orange and Blue neighborhoods are fairly close in terms of counts, but Orange remains in the lead. Next come the Red, Green, Yellow, Silver and Gold neighborhoods. The Purple district is far behind, with only 3 homes sold as seen in the summary. 
+
+**This means that the Orange, Blue and Red districts contain the most homes for sale, while the Purple district has virtually no homes for sale.**
+
+
+> Bar Plot of Average School Rating by Neighborhood:
+
+Now let's take a look at the second barplot on the Average School Rating by neighborhood. The color of each neighborhood is preserved for better legibility and the data is sorted in descending order. The School Rating corresponds to the rating of the associated school on a scale of 0 to 10. Each neighborhood is assigned a set of schools: elementary, middle and high. We can therefore calculate the average rating by school group, and by neighborhood.
+
+```{r}
+# Calculate average rating for each neighborhood
+avg_rating <- housingMerg %>%
+  group_by(neighborhood) %>%
+  summarize(avg_rating = mean(c(elementary_rating, middle_rating, high_rating), na.rm = TRUE))
+
+# Create the bar plot with custom colors
+ggplot(avg_rating, aes(x = reorder(neighborhood, -avg_rating), y = avg_rating, fill = neighborhood)) + 
+  geom_bar(stat = "identity", show.legend = FALSE) +
+  scale_fill_manual(values = neighborhood_colors) +
+  labs(title = "Average School Rating by Neighborhood", x = "Neighborhood", y = "Average Rating") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+This bar plot shows the average school rating for each neighborhood. It combines the ratings of elementary, middle, and high schools to give an overall educational quality score for each neighborhood. This is useful for identifying areas with better educational facilities which can be attractive for families.
+
+Gold leads the way with an average rating of about 8.5, followed by Yellow, Green, Silver, Blue, Orange, Purple and finally Red with an average rating of about 2.5.
+
+**We can deduce that the Gold, Yellow and Green districts can be highly prized, as they are associated with highly rated schools.**
+
+
+*Include at least one Boxplot*
+
+> Box Plot of Sold Prices by Neighborhood:
+
+Let's move on to the boxplots.
+
+The first boxplot shows Sold Price by Neighborhood. Once again, the colors chosen correspond to the colors of the associated category. I've also added the 1st quartile, median and 3rd quartile of the sold price to better position the values. In addition, the data is sorted in descending order for easier readability.
+
+```{r}
+# Calculate quartiles
+Q1 <- quantile(housingMerg$soldprice, 0.25)
+median <- median(housingMerg$soldprice)
+Q3 <- quantile(housingMerg$soldprice, 0.75)
+
+# Box Plot of Sold Prices by Neighborhood
+ggplot(housingMerg, aes(x = reorder(neighborhood, -soldprice), y = soldprice, fill = neighborhood)) + 
+  geom_boxplot() +
+  scale_fill_manual(values = neighborhood_colors) +
+  geom_hline(yintercept = Q1, linetype = "dashed", color = "green") +
+  geom_hline(yintercept = median, linetype = "dashed", color = "red") +
+  geom_hline(yintercept = Q3, linetype = "dashed", color = "blue") +
+  annotate("text", x = 10, y = Q1, label = "Q1", hjust = 1.2, vjust = -0.4, color = "green") +
+  annotate("text", x = 10, y = median, label = "Median", hjust = 1.2, vjust = -0.4, color = "red") +
+  annotate("text", x = 10, y = Q3, label = "Q3", hjust = 1.2, vjust = -0.4, color = "purple") +
+  labs(title = "Sold Prices by Neighborhood", x = "Neighborhood", y = "Sold Price") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+The box plot displays the distribution of housing prices for each neighborhood. It shows the median, quartiles, and potential outliers in the housing prices. This can help identify neighborhoods with higher price stability or those with high variability, which might indicate emerging or fluctuating markets.
+
+Here, we see that the Silver and Blue districts contain 50% or more of their values between the 1st and 3rd quartile of the sale price. The district stands out from the others by having more than 50% of its values above the 3rd quartile, or above 75% of other sold prices. The Green and Yellow districts are generally equivalent, with a similar 1st and 3rd quartiles, but a slightly lower median for the Yellow district. The Purple neighborhood is the one with the least extensive values, which can be explained by the few houses in this neighborhood (3). Finally, the Red district has almost 50% of its values below the 1st quartile of the sold price, which means below 75% of the other sold prices.
+
+**We can conclude that the Gold district is by far the most expensive and the red district is by far the cheapest. The Silver and Blue districts are generally within the norm.**
+
+
+> Box Plot of Sold Prices by Type of Housing Unit:
+
+The second boxplot represents the Sold Prices by Type of Housing Unit. In fact, there are several types of accommodation (condo, multi-family home, townhouse, etc.). It is interesting to know which type of housing is the most expensive. To facilitate the positioning of the values, I again added the 1st quartile, the median and the 3rd quartile. The values are also sorted in descending order.
+
+```{r}
+# Calculate quartiles
+Q1 <- quantile(housingMerg$soldprice, 0.25)
+median <- median(housingMerg$soldprice)
+Q3 <- quantile(housingMerg$soldprice, 0.75)
+
+# Box Plot of Sold Prices by Type of Housing Unit
+ggplot(housingMerg, aes(x = reorder(type, -soldprice), y = soldprice, fill = type)) + 
+  geom_boxplot() + 
+  geom_hline(yintercept = Q1, linetype = "dashed", color = "green") +
+  geom_hline(yintercept = median, linetype = "dashed", color = "red") +
+  geom_hline(yintercept = Q3, linetype = "dashed", color = "blue") +
+  annotate("text", x = 5, y = Q1, label = "Q1", hjust = 1.2, vjust = -0.4, color = "green") +
+  annotate("text", x = 5, y = median, label = "Median", hjust = 1.2, vjust = -0.4, color = "red") +
+  annotate("text", x = 5, y = Q3, label = "Q3", hjust = 1.2, vjust = -0.4, color = "purple") +
+  labs(title = "Sold Prices by Type of Housing Unit", x = "Type of Unit", y = "Sold Price") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+The box plot displays the distribution of housing prices for different types of housing units (e.g., single-family homes, condos, townhouses). It shows the median, quartiles, and potential outliers in the prices for each type of unit. This helps in comparing the price ranges for different types of housing and can provide insights into which types of housing are more expensive or have more price variability.
+
+From the outset, we notice that the two categories which dominate in terms of prices are multi-family home and single-family home, having part of their values above the 3rd quartile of the sold price. This type of house is undoubtedly the largest in order to accommodate large families. The other 2 categories have more than 50% of their values below the 1st quartile, or below 75% of the other sold prices.
+
+**It is no surprise that family homes are the most expensive and condo-type housing is the most affordable, as are townhouse-type housing.**
+
+
+### Two-variables visuals ###
+
+*Include at least one scatter plot*
+
+> Scatter Plot of Sold Price vs. Square Footage:
+
+Let’s move on to scatter plot.
+The first scatter plot shows the relationship between the sold price of houses and their square footage. Each point represents a house, with the x-axis indicating the square footage and the y-axis indicating the sold price. This plot helps in understanding how house size influences its price and can reveal trends or patterns, such as whether larger houses tend to sell for higher prices.
+
+```{r}
+# Scatter Plot of Sold Price vs. Square Footage with Smooth Spline Line
+ggplot(housingMerg, aes(x = sqft, y = log(soldprice))) + 
+  geom_point(alpha = 0.6, color = "blue") + 
+  geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs"), se = FALSE, color = "red") +
+  labs(title = "Sold Price vs. Square Footage", x = "Square Footage", y = "log(Sold Price)") +
+  theme_minimal()
+```
+
+I chose to use the logarithm to represent the sold price values. Indeed, the points are very scattered, the use of the logarithm makes it possible to bring the points together, in addition to avoiding a multitude of 0s on the y bar (due to high sold price). In addition, I drew a line to better visualize the trend of the points.
+
+Thus, we observe a fairly significant dispersion of points with a slight trend emerging as seen with the red line. Two phases seem to be emerging:
+
+* In the first phase, the sale price increases almost linearly for an area between 500 and 2000 square feet, going from a logarithm equal to 13.75 to 14. This represents a sale price going from 936589 to 1202604, a sold price difference of 266015 for a square feet difference of 1500.
+
+* In the second phase, the sale price increases almost linearly for an area varying from 2000 to 5000 square feet, going from a logarithm of 14 to approximately 14.2. This represents a sale price going from 1202604 to 1468864, which mean a sold price difference of 266260 for a square feet difference of 3000.
+
+**It would therefore seem that the more the area in square feet increases, the less the sold price increases, and the closer the prices become (wide dispersion at the beginning, and becomes finer with the increase in area)**
+
+> Scatter Plot of Sold Price vs. Year:
+
+```{r}
+# Scatter Plot of Sold Price vs. Year with Smooth Spline Line
+ggplot(housingMerg, aes(x = year, y = log(soldprice))) + 
+  geom_point(alpha = 0.6, color = "purple") + 
+  geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs"), se = FALSE, color = "red") +
+  labs(title = "Sold Price vs. Year", x = "Year", y = "log(Sold Price)") +
+  theme_minimal()
+```
+
+In short, until 1975, the year the house was built seemed to significantly increase the price of housing. After 1975, the increase in the sold price was lower.
+
+*Include at least one high density plot*
+
+> Density Plot of Sold Prices by Number of Bedrooms:
+
+The density plot shows the distribution of sold prices for houses with different numbers of bedrooms.
+Each line represents the distribution of sold prices for houses with a specific number of bedrooms.
+This plot helps in comparing the price distributions across houses with different bedroom counts, identifying which bedroom categories have higher or lower price ranges, and understanding the price density.
+
+```{r}
+# Calculate quartiles
+Q1 <- quantile(housingMerg$soldprice, 0.25)
+median <- median(housingMerg$soldprice)
+Q3 <- quantile(housingMerg$soldprice, 0.75)
+
+# Density Plot of Sold Prices by Number of Bedrooms
+ggplot(housingMerg, aes(x = soldprice, fill = factor(beds))) + 
+  geom_density(alpha = 0.6) +
+  geom_vline(xintercept = Q1, linetype = "dashed", color = "green") +
+  geom_vline(xintercept = median, linetype = "dashed", color = "red") +
+  geom_vline(xintercept = Q3, linetype = "dashed", color = "blue") +
+  annotate("text", x = Q1, y = 1.2e-06, label = "Q1", hjust = 1.2, vjust = -0.4, color = "green") +
+  annotate("text", x = median, y = 1.2e-06, label = "Median", hjust = 1.2, vjust = -0.4, color = "red") +
+  annotate("text", x = Q3, y = 1.2e-06, label = "Q3", hjust = 1.2, vjust = -0.4, color = "purple") +
+  labs(title = "Distribution of Sold Prices by Number of Bedrooms", x = "Sold Price", y = "Density", fill = "Number of Bedrooms") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set1")
+```
+
+A 6 bedrooms housing is way more expensive than a 1 bedroom housing.
+
+
+> # Density Plot of Sold Prices by Number of Bathrooms
+
+We now come to the density plot.
+The first plot shows the distribution of the sold price by level. To better position the values, I added the 1st quartile, the median and the 3rd quartile.
+
+```{r}
+# Density Plot of Sold Prices by Number of Bathrooms
+ggplot(housingMerg, aes(x = soldprice, fill = factor(levels))) + 
+  geom_density(alpha = 0.6) + 
+  labs(title = "Distribution of Sold Prices by Levels", x = "Sold Price", y = "Density", fill = "Levels") +
+  geom_vline(xintercept = Q1, linetype = "dashed", color = "green") +
+  geom_vline(xintercept = median, linetype = "dashed", color = "red") +
+  geom_vline(xintercept = Q3, linetype = "dashed", color = "blue") +
+  annotate("text", x = Q1, y = 10e-07, label = "Q1", hjust = 1.2, vjust = -0.4, color = "green") +
+  annotate("text", x = median, y = 10e-07, label = "Median", hjust = 1.2, vjust = -0.4, color = "red") +
+  annotate("text", x = Q3, y = 10e-07, label = "Q3", hjust = 1.2, vjust = -0.4, color = "purple") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set2")
+```
+
+Only 2 levels appear: houses have only one or 2 floors. We see that whatever the number of levels, we observe a density peak around the median, as well as around the 3rd quartile.
+We notice a greater density of 2-floors housing in the upper part of the sold price, and another peak in density just below the 1st quartile for 1-floors housing.
+
+**We deduce that 2-floors housing is generally more expensive than 1-floor housing.**
+
+
+### Analysis ###
+
+*Include at least one regression result*
+
+Now that we know more about the dataset and these trends, let's move on to the regression.
+
+For this, I wanted to perform a multiple linear regression to predict the sold price of houses based on various predictors. Indeed, I wanted to know what factors really influence the sale price.
+
+Here is my model:
+
+```{r}
+# Fit the multiple linear regression model
+lm_model <- lm(soldprice ~ sqft + beds + baths + year + neighborhood + elementary_rating + middle_rating + high_rating, data = housingMerg)
+
+# Summary of the model
+summary(lm_model)
+```
+
+The model predicts the soldprice based on sqft, beds, baths, year, neighborhood, and rating. The summary(lm_model) provides coefficients, standard errors, t-values, and p-values for each predictor, along with R-squared and adjusted R-squared values to assess the model's fit.
+
+Here are the results:
+
+* Statistically significant predictors are Bedrooms, year built, middle school rating, and high school rating: they all have a p-value lower than 0.001. Bedrooms and high school rating are the most significant. Indeed:
+
+  * An additional bedroom is associated with an increase in sold price by approximately $58530, holding other variables constant.
+
+  * An increase in the high school rating by one point is associated with an increase in the sold price by $52,430, holding other variables constant.
+
+* R-squared value is 0.4499 which indicates that approximately 44.99% of the variance in sold prices is explained by the model.
+
+* P-value is lower than 2.2e-16, so the model is statistically significant overall, meaning that at least some of the predictors are significantly associated with the sold price.
+
+Therefore, the analysis of the model indicates that while certain variables like the number of bedrooms, the year the house was built, and school ratings (middle and high school) have significant effects on the sold price, others such as square footage and the specific neighborhood do not, after accounting for other factors in the model.
+
+This is quite a surprising result. Indeed, the surface area is generally a means of determining the price of housing and is commonly used to compare the price of housing depending on the location, and therefore the neighborhood.
+
+
+Let's plot the residuals to check the fit of this model :
+
+The residual plot helps to visually check if the residuals are randomly distributed, indicating a good model fit.
+
+```{r}
+# Plotting the residuals to check the fit
+ggplot(lm_model, aes(.fitted, .resid)) + 
+  geom_point() + 
+  geom_smooth(method = "loess", se = FALSE, col = "blue") + 
+  labs(title = "Residuals vs Fitted", x = "Fitted Values", y = "Residuals") +
+  theme_minimal()
+```
+
+We observe 2 groups of points, one above 0, the other below 0, almost in symmetry. The blue line crosses the graph and generally runs along the x axis at y = 0, thus passing between the 2 groups of points.
+
+Here is what we can say about the graph:
+
+* This symmetry suggests that the model does not systematically overpredict or underpredict the sold prices across the range of fitted values: the model's predictions are, on average, correct.
+
+* Ideally, residuals should be randomly scattered around the horizontal axis without any distinct patterns or groups. The fact that we can see 2 groups of point may suggest that the model fits certain ranges of the data better than others.
+
+* The fact that the line crosses the graph and runs close to the x-axis suggests that there is no major systematic error in the model: on average, the residuals are centered around zero and the model's predictions are not biased.
+
+**Therefore, while the model appears to be unbiased on average, the distinct grouping of residuals suggests there might be underlying complexities that need to be addressed to improve the model's fit.**
+
+
+*Include at least one clustering result*
+
+We will use k-means clustering to group the houses based on sqft, beds, baths, and soldprice.
+
+```{r}
+# Prepare the data for clustering
+cluster_data <- housingMerg %>%
+  select(sqft, beds, baths, soldprice) %>%
+  na.omit()
+
+# Standardize the data
+cluster_data_scaled <- scale(cluster_data)
+
+# Determine the optimal number of clusters using the elbow method
+wss <- (nrow(cluster_data_scaled)-1)*sum(apply(cluster_data_scaled, 2, var))
+for (i in 2:15) wss[i] <- sum(kmeans(cluster_data_scaled, centers=i)$tot.withinss)
+
+# Plot the elbow method
+plot(1:15, wss, type="b", pch = 19, frame = FALSE, 
+     xlab="Number of clusters", ylab="Total within-clusters sum of squares",
+     main = "Elbow Method for Optimal Number of Clusters")
+
+# Perform k-means clustering with the chosen number of clusters
+set.seed(123)
+kmeans_model <- kmeans(cluster_data_scaled, centers = 4)  # Assuming 4 clusters based on elbow method
+
+# Add cluster assignment to the original data
+housingMerg$cluster <- factor(kmeans_model$cluster)
+
+# Plot the clusters
+ggplot(housingMerg, aes(x = sqft, y = soldprice, color = cluster)) + 
+  geom_point(alpha = 0.6) + 
+  labs(title = "K-means Clustering of Houses", x = "Square Footage", y = "Sold Price") +
+  theme_minimal() +
+  scale_color_brewer(palette = "Set2")
+```
+
+The cluster_data contains selected features (sqft, beds, baths, soldprice) for clustering.
+The data is standardized using scale to ensure all features contribute equally to the distance calculations.
+The elbow method helps determine the optimal number of clusters by plotting the total within-clusters sum of squares against the number of clusters.
+K-means clustering is performed with the chosen number of clusters, and cluster assignments are added to the original data.
+
+
+### Sensitive Analysis ###
+
+Let's remove all oddities and outliers from the dataset.
+
+```{r}
+housing <-read.csv("housing.csv", header = T)
+dim(housing)
+```
+
+```{r warning = FALSE}
+# Categorization
+housing$neighborhood <- as.factor(housing$neighborhood)
+housing$type <- as.factor(housing$type)
+housing$levels <- as.integer(housing$levels)
+housing$cooling <- as.factor(housing$cooling)
+housing$heating <- as.factor(housing$heating)
+housing$fireplace <- as.factor(housing$fireplace)
+housing$elementary <- as.factor(housing$elementary)
+housing$middle <- as.factor(housing$middle)
+housing$high <- as.factor(housing$high)
+
+# Combine duplicates
+housing$type[housing$type == "condominium"] <- "condo"
+housing$type[housing$type == "town house"] <- "townhouse"
+housing$type <- as.factor(housing$type)
+
+
+# Remove outliers
+housing <- subset(housing, beds != 999)
+housing <- subset(housing, baths != 25)
+housing <- subset(housing, year != 1495)
+housing <- subset(housing, year != 2111)
+housing <- subset(housing, soldprice != 664)
+
+
+# Trim leading and trailing spaces in the cooling, heating and fireplace column
+housing$cooling <- str_trim(housing$cooling)
+housing$heating <- str_trim(housing$heating)
+housing$fireplace <- str_trim(housing$fireplace)
+
+# Replace empty strings with NA
+housing$cooling[housing$cooling == ""] <- NA
+housing$heating[housing$heating == ""] <- NA
+housing$fireplace[housing$fireplace == ""] <- NA
+
+# Replace Yes by 1 and No by 0
+housing$cooling <- ifelse(housing$cooling == "Yes", 1,
+                                      ifelse(housing$cooling == "No", 0, NA))
+housing$heating <- ifelse(housing$heating == "Yes", 1,
+                                      ifelse(housing$heating == "No", 0, NA))
+housing$fireplace <- ifelse(housing$fireplace == "Yes", 1,
+                                          ifelse(housing$fireplace == "No", 0, NA))
+
+# Remove NA's
+housing_clean <- na.omit(housing)
+
+summary(housing_clean)
+```
+
+```{r}
+dim(housing_clean)
+```
+
+With this method, we go from 683 row to 635, which means we removed 48 rows from housing.csv.
+
+```{r}
+schoolsData <-read.csv("schools.csv", header = T)
+dim(schoolsData)
+```
+
+We know from above that schools.csv does not contain any oddities or outliers. We procede to the merge:
+
+```{r}
+# Create new dataset
+housingMergNew <- housing_clean
+
+# Merge the housing and schools datasets based on the elementary school
+housingMergNew <- housingMergNew %>%
+  left_join(schoolsData %>% rename(elementary_rating = rating, elementary_size = size), 
+            by = c("elementary" = "school"))
+
+# Merge the housing and schools datasets based on the middle school
+housingMergNew <- housingMergNew %>%
+  left_join(schoolsData %>% rename(middle_rating = rating, middle_size = size), 
+            by = c("middle" = "school"))
+
+# Merge the housing and schools datasets based on the high school
+housingMergNew <- housingMergNew %>%
+  left_join(schoolsData %>% rename(high_rating = rating, high_size = size), 
+            by = c("high" = "school"))
+
+# Verify the merge
+summary(housingMergNew)
+```
+
+Some values of the summary statistics changes. This is particularly the case for the square feet column for which all the values are different.
+
+
+**Analysis part**
+
+Let’s compare the model results:
+
+* Statistically significant predictors are still Bedrooms, year built, middle school rating, and high school rating: they all have a p-value lower than 0.001. But this time, the year and high school rating are the most significant, instead of bedrooms and high school rating. Here:
+
+  * An additional year is associated with an increase in sold price by approximately $3353, holding other variables constant.
+
+  * Value for high school rating does not change.
+
+* R-squared value is 0.4497 and not 0.4499. The difference is not significant.
+
+* The adjusted R-squared value is 0.4322 instead of 0.4384 which might be the only big difference between the 2 models.
+
+* P-value is also lower than 2.2e-16, so the model is statistically significant overall, meaning that at least some of the predictors are significantly associated with the sold price.
+
+```{r}
+# Fit the multiple linear regression model
+lm_model <- lm(soldprice ~ sqft + beds + baths + year + neighborhood + elementary_rating + middle_rating + high_rating, data = housingMergNew)
+
+# Summary of the model
+summary(lm_model)
+```
+
+Also by comparing the graphs, we do not see any major difference:
+
+```{r}
+# Plotting the residuals to check the fit
+ggplot(lm_model, aes(.fitted, .resid)) + 
+  geom_point() + 
+  geom_smooth(method = "loess", se = FALSE, col = "blue") + 
+  labs(title = "Residuals vs Fitted", x = "Fitted Values", y = "Residuals") +
+  theme_minimal()
+```
+
+We get the exact same description as earlier.
+
+Finally, K-means gives exactly the same observations:
+
+```{r}
+# Prepare the data for clustering
+cluster_data <- housingMergNew %>%
+  select(sqft, beds, baths, soldprice) %>%
+  na.omit()
+
+# Standardize the data
+cluster_data_scaled <- scale(cluster_data)
+
+# Determine the optimal number of clusters using the elbow method
+wss <- (nrow(cluster_data_scaled)-1)*sum(apply(cluster_data_scaled, 2, var))
+for (i in 2:15) wss[i] <- sum(kmeans(cluster_data_scaled, centers=i)$tot.withinss)
+
+# Plot the elbow method
+plot(1:15, wss, type="b", pch = 19, frame = FALSE, 
+     xlab="Number of clusters", ylab="Total within-clusters sum of squares",
+     main = "Elbow Method for Optimal Number of Clusters")
+
+# Perform k-means clustering with the chosen number of clusters
+set.seed(123)
+kmeans_model <- kmeans(cluster_data_scaled, centers = 4)  # Assuming 4 clusters based on elbow method
+
+# Add cluster assignment to the original data
+housingMergNew$cluster <- factor(kmeans_model$cluster)
+
+# Plot the clusters
+ggplot(housingMergNew, aes(x = sqft, y = soldprice, color = cluster)) + 
+  geom_point(alpha = 0.6) + 
+  labs(title = "K-means Clustering of Houses", x = "Square Footage", y = "Sold Price") +
+  theme_minimal() +
+  scale_color_brewer(palette = "Set2")
+```
+
+It seems that, in this dataset, the loss of 48 rows does not affect the analysis results.
+
+The similarity in results between deleting anomalies and readjusting values with predictions can be attributed to the inherent robustness of the dataset, the accuracy of prediction models, and the nature of the anomalies. Both methods aim to improve data quality, and when done correctly, they can lead to datasets that faithfully represent the underlying trends and patterns, resulting in similar analytical outcomes.
+
